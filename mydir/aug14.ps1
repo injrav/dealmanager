@@ -1,8 +1,13 @@
 # file: build-queue-file.ps1
-# Input  : my_transactions.csv, mapping.csv (same folder as this script)
-# Output : my_transactions_modified.csv
+# Usage:
+# powershell -ExecutionPolicy Bypass -File .\build-queue-file.ps1 "C:\path\to\my_transactions.csv" "C:\path\to\mapping.csv" "C:\path\to\my_transactions_modified.csv"
 
-# --- helper: find a column name regardless of case/underscores/spaces ---
+param(
+    [Parameter(Mandatory = $true)] [string]$sourceFile,
+    [Parameter(Mandatory = $true)] [string]$mappingFile,
+    [Parameter(Mandatory = $true)] [string]$outputFile
+)
+
 function Get-NormalizedColumnName {
     param($object, [string]$wanted)
     $norm = { param($s) ($s -replace '\W','').ToLower() }
@@ -12,13 +17,11 @@ function Get-NormalizedColumnName {
 }
 
 # --- load mapping.csv and build a lookup: Branch -> set of Drive_Up_PC_IDs ---
-$mappingRows = Import-Csv -Path ".\mapping.csv"
+$mappingRows = Import-Csv -Path $mappingFile
 
-# normalize the column names once
 $mapBranchCol = Get-NormalizedColumnName $mappingRows[0] 'Branch'
 $mapDriveCol  = Get-NormalizedColumnName $mappingRows[0] 'Drive_Up_PC_ID'
 
-# Hashtable of branch -> HashSet of IDs (case-insensitive)
 $mapping = @{}
 foreach ($row in $mappingRows) {
     $branch = ($row.$mapBranchCol).Trim()
@@ -29,17 +32,14 @@ foreach ($row in $mappingRows) {
             [System.StringComparer]::OrdinalIgnoreCase
         )
     }
-
-    # Split the pipe-separated list, trim, drop empties
     $ids = ($row.$mapDriveCol -split '\s*\|\s*' | Where-Object { $_ -ne '' })
     foreach ($id in $ids) { [void]$mapping[$branch].Add($id.Trim()) }
 }
 
-# --- read my_transactions.csv, replace Drive_Up_PC_ID with Queue ---
-$tx = Import-Csv -Path ".\my_transactions.csv"
-if (-not $tx) { throw "my_transactions.csv appears to be empty." }
+# --- read my_transactions.csv ---
+$tx = Import-Csv -Path $sourceFile
+if (-not $tx) { throw "Source file appears to be empty." }
 
-# find key columns in the transactions file
 $txBranchCol = Get-NormalizedColumnName $tx[0] 'Branch ID'
 $txDriveCol  = Get-NormalizedColumnName $tx[0] 'Drive_Up_PC_ID'
 
@@ -48,13 +48,11 @@ ForEach-Object {
     $branch = ($_.($txBranchCol)).Trim()
     $pcid   = ($_.($txDriveCol)).Trim()
 
-    # default Queue = 'L', switch to 'D' if mapping contains a match
     $queue = 'L'
     if ($mapping.ContainsKey($branch) -and $pcid -and $mapping[$branch].Contains($pcid)) {
         $queue = 'D'
     }
 
-    # rebuild the row: same columns/order as original, but swap Drive_Up_PC_ID -> Queue
     $ordered = [ordered]@{}
     foreach ($name in $_.PSObject.Properties.Name) {
         if ($name -eq $txDriveCol) {
@@ -64,6 +62,6 @@ ForEach-Object {
         }
     }
     [pscustomobject]$ordered
-} | Export-Csv -Path ".\my_transactions_modified.csv" -NoTypeInformation -Encoding UTF8
+} | Export-Csv -Path $outputFile -NoTypeInformation -Encoding UTF8
 
-Write-Host "Created my_transactions_modified.csv"
+Write-Host "Created $outputFile"
