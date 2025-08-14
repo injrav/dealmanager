@@ -24,16 +24,33 @@ $mapDriveCol  = Get-NormalizedColumnName $mappingRows[0] 'Drive_Up_PC_ID'
 
 $mapping = @{}
 foreach ($row in $mappingRows) {
-    $branch = ($row.$mapBranchCol).Trim()
-    if (-not $branch) { continue }
+    if (-not $row) { continue }
+
+    # SAFE trimming
+    $branch   = ([string]$row.$mapBranchCol).Trim()
+    $driveRaw = ([string]$row.$mapDriveCol)
+
+    # Print values to console
+    Write-Host "Branch: '$branch' | Drive_Up_PC_ID raw: '$driveRaw'"
+
+    if ([string]::IsNullOrWhiteSpace($branch)) { continue }
 
     if (-not $mapping.ContainsKey($branch)) {
         $mapping[$branch] = [System.Collections.Generic.HashSet[string]]::new(
             [System.StringComparer]::OrdinalIgnoreCase
         )
     }
-    $ids = ($row.$mapDriveCol -split '\s*\|\s*' | Where-Object { $_ -ne '' })
-    foreach ($id in $ids) { [void]$mapping[$branch].Add($id.Trim()) }
+
+    # Split by pipe and trim
+    $ids = $driveRaw -split '\s*\|\s*' |
+           Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+           ForEach-Object { $_.Trim() }
+
+    # Print each split ID
+    foreach ($id in $ids) {
+        Write-Host "   -> ID: '$id'"
+        [void]$mapping[$branch].Add($id)
+    }
 }
 
 # --- read my_transactions.csv ---
